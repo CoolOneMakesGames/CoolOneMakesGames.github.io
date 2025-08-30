@@ -55,7 +55,7 @@
 </head>
 <body>
     <div class="controls">
-        <p><strong>Controls:</strong> A/D or ←/→ to move, W or ↑ to jump, S or ↓ to drop through platforms, Space to pause</p>
+        <p><strong>Controls:</strong> A/D or ←/→ to move, W or ↑ to jump, S or ↓ to drop through platforms, Space to pause, R to restart</p>
         <p><strong>Features:</strong> Physics, collision detection, jump-through platforms, moving platforms</p>
     </div>
     <div class="file-path">
@@ -137,12 +137,20 @@
                     e.preventDefault();
                     game.gameState = 'playing';
                     createLevel(1);
+                } else if (game.gameState === 'title' && e.key.toLowerCase() === 'r') {
+                    e.preventDefault();
+                    restartGame();
                 } else if (game.gameState === 'playing') {
                     if (e.key === ' ') {
                         e.preventDefault();
                         if (!game.cutsceneActive) {
                             game.paused = !game.paused;
                         }
+                    }
+                    
+                    if (e.key.toLowerCase() === 'r') {
+                        e.preventDefault();
+                        restartGame();
                     }
                     
                     if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(e.key.toLowerCase())) {
@@ -584,6 +592,37 @@
             game.gameCompleted = true;
         }
 
+        function restartGame() {
+            // Reset game state
+            game.paused = false;
+            game.currentLevel = 1;
+            game.levelTransition = false;
+            game.boss = null;
+            game.bossActive = false;
+            game.cutsceneActive = false;
+            game.cutsceneFrame = 0;
+            game.gameCompleted = false;
+            game.gameState = 'title';
+            game.titleAnimFrame = 0;
+            
+            // Reset player state
+            player.x = 100;
+            player.y = 300;
+            player.vx = 0;
+            player.vy = 0;
+            player.grounded = false;
+            player.facingRight = true;
+            
+            // Clear platforms and collectibles
+            game.platforms = [];
+            game.movingPlatforms = [];
+            game.collectibles = [];
+            
+            // Reset camera
+            game.camera.x = 0;
+            game.camera.y = 0;
+        }
+
         function updateCutscene() {
             if (game.cutsceneActive) {
                 game.cutsceneFrame++;
@@ -628,6 +667,10 @@
                 ctx.font = '24px Arial';
                 ctx.fillStyle = '#FFF';
                 ctx.fillText('You collected all the coins!', canvas.width / 2, canvas.height / 2 + 20);
+                
+                ctx.font = '32px Arial';
+                ctx.fillStyle = '#FFD700';
+                ctx.fillText('You won!', canvas.width / 2, canvas.height / 2 + 60);
             } else if (game.cutsceneFrame < 240) {
                 ctx.fillText('CONGRATULATIONS!', canvas.width / 2, canvas.height / 2 - 50);
                 
@@ -635,10 +678,14 @@
                 ctx.fillStyle = '#FFF';
                 ctx.fillText('You collected all the coins!', canvas.width / 2, canvas.height / 2 + 20);
                 
+                ctx.font = '32px Arial';
+                ctx.fillStyle = '#FFD700';
+                ctx.fillText('You won!', canvas.width / 2, canvas.height / 2 + 60);
+                
                 const bounce = Math.sin(game.cutsceneFrame * 0.3) * 10;
                 ctx.font = '20px Arial';
                 ctx.fillStyle = '#90EE90';
-                ctx.fillText('✨ LEVEL COMPLETE ✨', canvas.width / 2, canvas.height / 2 + 60 + bounce);
+                ctx.fillText('✨ LEVEL COMPLETE ✨', canvas.width / 2, canvas.height / 2 + 100 + bounce);
             } else {
                 ctx.fillText('CONGRATULATIONS!', canvas.width / 2, canvas.height / 2 - 50);
                 
@@ -646,9 +693,13 @@
                 ctx.fillStyle = '#FFF';
                 ctx.fillText('You collected all the coins!', canvas.width / 2, canvas.height / 2 + 20);
                 
+                ctx.font = '32px Arial';
+                ctx.fillStyle = '#FFD700';
+                ctx.fillText('You won!', canvas.width / 2, canvas.height / 2 + 60);
+                
                 ctx.font = '20px Arial';
                 ctx.fillStyle = '#90EE90';
-                ctx.fillText('✨ LEVEL COMPLETE ✨', canvas.width / 2, canvas.height / 2 + 60);
+                ctx.fillText('✨ LEVEL COMPLETE ✨', canvas.width / 2, canvas.height / 2 + 100);
                 
                 const fadeOut = 1 - Math.max(0, (game.cutsceneFrame - 240) / 60);
                 ctx.globalAlpha = fadeOut;
