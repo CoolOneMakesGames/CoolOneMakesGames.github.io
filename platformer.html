@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Platformer Engine</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #87CEEB;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 2px solid #333;
+            background: linear-gradient(to bottom, #87CEEB 0%, #98FB98 100%);
+        }
+        .controls {
+            position: absolute;
+            top: 20px;
+            color: #333;
+            text-align: center;
+            background: rgba(255,255,255,0.8);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .file-path {
+            position: absolute;
+            top: 120px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255,255,255,0.9);
+            padding: 10px;
+            border-radius: 5px;
+            border: 2px solid #333;
+        }
+        .file-path input {
+            margin: 5px;
+            padding: 5px;
+            width: 300px;
+        }
+        .file-path button {
+            padding: 5px 10px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <p><strong>Controls:</strong> A/D or ←/→ to move, W or ↑ to jump, S or ↓ to drop through platforms, Space to pause</p>
+        <p><strong>Features:</strong> Physics, collision detection, jump-through platforms, moving platforms</p>
+    </div>
+    <div class="file-path">
+        <label for="imagePath"><strong>Enter path to your player image:</strong></label><br>
+        <input type="text" id="imagePath" placeholder="C:\Users\YourName\Pictures\player.png">
+        <button onclick="loadPlayerImage()">Load Image</button>
+    </div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const GRAVITY = 0.5;
+        const JUMP_FORCE = -12;
+        const MOVE_SPEED = 5;
+        const FRICTION = 0.8;
+
+        const game = {
+            camera: { x: 0, y: 0 },
+            keys: {},
+            platforms: [],
+            movingPlatforms: [],
+            collectibles: [],
+            cutsceneActive: false,
+            cutsceneFrame: 0,
+            cutsceneMaxFrames: 300,
+            gameCompleted: false,
+            paused: false,
+            currentLevel: 1,
+            maxLevel: 4,
+            levelTransition: false,
+            boss: null,
+            bossActive: false,
+            gameState: 'title',
+            titleAnimFrame: 0
+        };
+
+        const boss = {
+            x: 780,
+            y: 120,
+            width: 80,
+            height: 100,
+            health: 8,
+            maxHealth: 8,
+            vx: 0,
+            vy: 0,
+            direction: -1,
+            speed: 2,
+            jumpCooldown: 0,
+            invulnerable: false,
+            invulnerableTime: 0,
+            color: '#8B0000',
+            grounded: false
+        };
+
+        const player = {
+            x: 100,
+            y: 300,
+            width: 20,
+            height: 30,
+            vx: 0,
+            vy: 0,
+            grounded: false,
+            color: '#FF6B6B',
+            image: null,
+            imageLoaded: false,
+            facingRight: true
+        };
+
+        document.addEventListener('keydown', (e) => {
+            const activeElement = document.activeElement;
+            const isInputField = activeElement && activeElement.tagName === 'INPUT';
+            
+            if (!isInputField) {
+                game.keys[e.key.toLowerCase()] = true;
+                
+                if (game.gameState === 'title' && (e.key === ' ' || e.key === 'Enter')) {
+                    e.preventDefault();
+                    game.gameState = 'playing';
+                    createLevel(1);
+                } else if (game.gameState === 'playing') {
+                    if (e.key === ' ') {
+                        e.preventDefault();
+                        if (!game.cutsceneActive) {
+                            game.paused = !game.paused;
+                        }
+                    }
+                    
+                    if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(e.key.toLowerCase())) {
+                        e.preventDefault();
+                    }
+                }
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            game.keys[e.key.toLowerCase()] = false;
+        });
+
+        function loadPlayerImage() {
+            const imagePath = document.getElementById('imagePath').value;
+            if (imagePath) {
+                const img = new Image();
+                img.onload = function() {
+                    player.image = img;
+                    player.imageLoaded = true;
+                    const aspectRatio = img.width / img.height;
+                    player.height = 30;
+                    player.width = player.height * aspectRatio;
+                    console.log('Player image loaded successfully!');
+                };
+                img.onerror = function() {
+                    console.error('Failed to load image. Check the file path.');
+                    alert('Could not load image. Make sure the path is correct and the file exists.');
+                };
+                img.src = 'file:///' + imagePath.replace(/\\/g, '/');
+            }
+        }
+
+        document.getElementById('imagePath').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                loadPlayerImage();
+            }
+        });
+
+        function createLevel(levelNum = 1) {
+            game.currentLevel = levelNum;
+            
+            if (levelNum === 1) {
+                createLevel1();
+            } else if (levelNum === 2) {
+                createLevel2();
+            } else if (levelNum === 3) {
+                createLevel3();
+            } else if (levelNum === 4) {
+                createLevel4();
+            }
+        }
+
+        function createLevel1() {
+            game.platforms = [
+                { x: 0, y: 550, width: 200, height: 50, type: 'solid', color: '#8B4513' },
+                { x: 300, y: 450, width: 150, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 500, y: 350, width: 100, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 650, y: 250, width: 150, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 400, y: 200, width: 100, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 0, y: 100, width: 120, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 700, y: 500, width: 100, height: 100, type: 'solid', color: '#8B4513' },
+                { x: 900, y: 400, width: 200, height: 200, type: 'solid', color: '#8B4513' },
+                { x: 1200, y: 300, width: 100, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1400, y: 200, width: 150, height: 20, type: 'jumpthrough', color: '#D2B48C' }
+            ];
+
+            game.movingPlatforms = [
+                {
+                    x: 200, y: 300, width: 80, height: 15,
+                    startX: 200, endX: 350, speed: 1, direction: 1,
+                    type: 'jumpthrough', color: '#FF9500'
+                },
+                {
+                    x: 800, y: 150, width: 100, height: 15,
+                    startY: 150, endY: 300, speed: 1.5, direction: 1,
+                    type: 'jumpthrough', color: '#FF9500', vertical: true
+                }
+            ];
+
+            game.collectibles = [
+                { x: 350, y: 410, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 530, y: 310, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 720, y: 210, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 450, y: 160, width: 15, height: 15, collected: false, color: '#FFD700' }
+            ];
+        }
+
+        function createLevel2() {
+            game.platforms = [
+                { x: 0, y: 550, width: 150, height: 50, type: 'solid', color: '#8B4513' },
+                { x: 250, y: 500, width: 100, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 450, y: 400, width: 120, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 650, y: 300, width: 100, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 850, y: 200, width: 150, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1100, y: 350, width: 100, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1300, y: 450, width: 200, height: 150, type: 'solid', color: '#8B4513' },
+                { x: 1550, y: 300, width: 100, height: 20, type: 'jumpthrough', color: '#D2B48C' }
+            ];
+
+            game.movingPlatforms = [
+                {
+                    x: 350, y: 350, width: 80, height: 15,
+                    startY: 200, endY: 450, speed: 2, direction: 1,
+                    type: 'jumpthrough', color: '#FF9500', vertical: true
+                },
+                {
+                    x: 750, y: 150, width: 100, height: 15,
+                    startX: 750, endX: 950, speed: 1.5, direction: 1,
+                    type: 'jumpthrough', color: '#FF9500'
+                }
+            ];
+
+            game.collectibles = [
+                { x: 280, y: 460, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 480, y: 360, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 680, y: 260, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 880, y: 160, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 1130, y: 310, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 1350, y: 410, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 1630, y: 210, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 370, y: 280, width: 15, height: 15, collected: false, color: '#FFD700' }
+            ];
+        }
+
+        function createLevel3() {
+            game.platforms = [
+                { x: 0, y: 550, width: 120, height: 50, type: 'solid', color: '#8B4513' },
+                { x: 200, y: 480, width: 80, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 350, y: 420, width: 80, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 500, y: 360, width: 80, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 650, y: 280, width: 100, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 850, y: 200, width: 80, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1000, y: 140, width: 120, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1200, y: 300, width: 100, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1400, y: 400, width: 150, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1650, y: 500, width: 150, height: 100, type: 'solid', color: '#8B4513' }
+            ];
+
+            game.movingPlatforms = [
+                {
+                    x: 300, y: 300, width: 60, height: 15,
+                    startY: 200, endY: 500, speed: 2.5, direction: 1,
+                    type: 'jumpthrough', color: '#FF9500', vertical: true
+                },
+                {
+                    x: 750, y: 100, width: 80, height: 15,
+                    startX: 750, endX: 950, speed: 2, direction: 1,
+                    type: 'jumpthrough', color: '#FF9500'
+                },
+                {
+                    x: 1100, y: 250, width: 80, height: 15,
+                    startY: 150, endY: 400, speed: 1.8, direction: 1,
+                    type: 'jumpthrough', color: '#FF9500', vertical: true
+                }
+            ];
+
+            game.collectibles = [
+                { x: 230, y: 440, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 280, y: 420, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 380, y: 380, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 430, y: 360, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 530, y: 320, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 580, y: 300, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 680, y: 240, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 730, y: 220, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 880, y: 160, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 930, y: 140, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 1030, y: 100, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 1080, y: 120, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 1230, y: 260, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 1280, y: 280, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 1430, y: 360, width: 15, height: 15, collected: false, color: '#FFD700' },
+                { x: 1480, y: 380, width: 15, height: 15, collected: false, color: '#FFD700' }
+            ];
+        }
+
+        function createLevel4() {
+            game.platforms = [
+                { x: 0, y: 550, width: 100, height: 50, type: 'solid', color: '#8B4513' },
+                { x: 150, y: 500, width: 60, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 250, y: 450, width: 60, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 350, y: 400, width: 60, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 450, y: 350, width: 80, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 600, y: 300, width: 60, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 750, y: 250, width: 80, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 900, y: 200, width: 60, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1050, y: 150, width: 80, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1200, y: 100, width: 60, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1350, y: 200, width: 80, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1500, y: 300, width: 60, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1650, y: 400, width: 80, height: 20, type: 'jumpthrough', color: '#D2B48C' },
+                { x: 1800, y: 500, width: 200, height: 100, type: 'solid', color: '#8B4513' }
+            ];
+
+            game.movingPlatforms = [
+                {
+                    x: 300, y: 250, width: 50, height: 15,
+                    startY: 150, endY: 450, speed: 3, direction: 1,
+                    type: 'jumpthrough', color: '#FF9500', vertical: true
+                },
+                {
+                    x: 650, y: 180, width: 70, height: 15,
+                    startX: 650, endX: 850, speed: 2.5, direction: 1,
+                    type: 'jumpthrough', color: '#FF9500'
+                },
+                {
+                    x: 1000, y: 80, width: 60, height: 15,
+                    startY: 80, endY: 350, speed: 2.2, direction: 1,
+                    type: 'jumpthrough', color: '#FF9500', vertical: true
+                },
+                {
+                    x: 1400, y: 350, width: 80, height: 15,
+                    startX: 1400, endX: 1600, speed: 2.8, direction: 1,
+                    type: 'jumpthrough', color: '#FF9500'
+                }
+            ];
+
+            const coins = [];
+            for (let i = 0; i < 31; i++) {
+                const x = 180 + (i % 8) * 120 + Math.random() * 30;
+                const y = 150 + Math.floor(i / 8) * 80 + Math.random() * 30;
+                coins.push({ x: x, y: y, width: 15, height: 15, collected: false, color: '#FFD700' });
+            }
+            coins.push({ x: 780, y: 230, width: 15, height: 15, collected: false, color: '#FFD700' });
+            game.collectibles = coins;
+            
+            game.boss = Object.assign({}, boss);
+            game.bossActive = true;
+        }
+
+        function updatePlayer() {
+            if (game.keys['a'] || game.keys['arrowleft']) {
+                player.vx = -MOVE_SPEED;
+                player.facingRight = false;
+            } else if (game.keys['d'] || game.keys['arrowright']) {
+                player.vx = MOVE_SPEED;
+                player.facingRight = true;
+            } else {
+                player.vx *= FRICTION;
+            }
+
+            if ((game.keys['w'] || game.keys['arrowup']) && player.grounded) {
+                player.vy = JUMP_FORCE;
+                player.grounded = false;
+            }
+
+            player.vy += GRAVITY;
+            if (player.vy > 15) player.vy = 15;
+
+            player.x += player.vx;
+            player.y += player.vy;
+
+            if (player.y > canvas.height) {
+                player.x = 100;
+                player.y = 300;
+                player.vx = 0;
+                player.vy = 0;
+            }
+        }
+
+        function checkCollision(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+
+        function handleCollisions() {
+            player.grounded = false;
+
+            const allPlatforms = [...game.platforms, ...game.movingPlatforms];
+
+            for (let platform of allPlatforms) {
+                if (checkCollision(player, platform)) {
+                    const overlapX = Math.min(player.x + player.width - platform.x, platform.x + platform.width - player.x);
+                    const overlapY = Math.min(player.y + player.height - platform.y, platform.y + platform.height - player.y);
+
+                    if (platform.type === 'jumpthrough') {
+                        if (player.vy > 0 && player.y < platform.y && overlapY < overlapX) {
+                            if (!(game.keys['s'] || game.keys['arrowdown'])) {
+                                player.y = platform.y - player.height;
+                                player.vy = 0;
+                                player.grounded = true;
+                            }
+                        }
+                    } else if (platform.type === 'solid') {
+                        if (overlapX < overlapY) {
+                            if (player.x < platform.x) {
+                                player.x = platform.x - player.width;
+                            } else {
+                                player.x = platform.x + platform.width;
+                            }
+                            player.vx = 0;
+                        } else {
+                            if (player.y < platform.y) {
+                                player.y = platform.y - player.height;
+                                player.vy = 0;
+                                player.grounded = true;
+                            } else {
+                                player.y = platform.y + platform.height;
+                                player.vy = 0;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (game.bossActive && game.boss) {
+                handleBossCollisions();
+            }
+        }
+
+        function updateBoss() {
+            if (!game.bossActive || !game.boss) return;
+
+            const b = game.boss;
+            
+            if (b.invulnerableTime > 0) {
+                b.invulnerableTime--;
+                if (b.invulnerableTime <= 0) {
+                    b.invulnerable = false;
+                }
+            }
+
+            b.vx = b.speed * b.direction;
+            b.vy += GRAVITY;
+            if (b.vy > 15) b.vy = 15;
+
+            b.x += b.vx;
+            b.y += b.vy;
+
+            if (b.x < 720 || b.x > 870) {
+                b.direction *= -1;
+            }
+
+            b.grounded = false;
+            const allPlatforms = [...game.platforms, ...game.movingPlatforms];
+            for (let platform of allPlatforms) {
+                if (checkCollision(b, platform)) {
+                    const overlapY = Math.min(b.y + b.height - platform.y, platform.y + platform.height - b.y);
+                    if (b.vy > 0 && b.y < platform.y) {
+                        b.y = platform.y - b.height;
+                        b.vy = 0;
+                        b.grounded = true;
+                    }
+                }
+            }
+
+            b.jumpCooldown--;
+            if (b.grounded && b.jumpCooldown <= 0 && Math.random() < 0.02) {
+                b.vy = JUMP_FORCE * 0.8;
+                b.jumpCooldown = 120;
+            }
+        }
+
+        function handleBossCollisions() {
+            const b = game.boss;
+            if (checkCollision(player, b)) {
+                if (player.vy > 0 && player.y < b.y && !b.invulnerable) {
+                    player.vy = JUMP_FORCE * 0.7;
+                    b.health--;
+                    b.invulnerable = true;
+                    b.invulnerableTime = 60;
+                    
+                    if (b.health <= 0) {
+                        game.bossActive = false;
+                        game.boss = null;
+                        
+                        const totalCoins = game.collectibles.length;
+                        const collectedCoins = game.collectibles.filter(c => c.collected).length;
+                        if (collectedCoins === totalCoins) {
+                            startCutscene();
+                        }
+                    }
+                } else if (!b.invulnerable) {
+                    player.x = 100;
+                    player.y = 300;
+                    player.vx = 0;
+                    player.vy = 0;
+                }
+            }
+        }
+
+        function updateMovingPlatforms() {
+            for (let platform of game.movingPlatforms) {
+                if (platform.vertical) {
+                    platform.y += platform.speed * platform.direction;
+                    if (platform.y <= platform.startY || platform.y >= platform.endY) {
+                        platform.direction *= -1;
+                    }
+                } else {
+                    platform.x += platform.speed * platform.direction;
+                    if (platform.x <= platform.startX || platform.x >= platform.endX) {
+                        platform.direction *= -1;
+                    }
+                }
+            }
+        }
+
+        function updateCollectibles() {
+            for (let collectible of game.collectibles) {
+                if (!collectible.collected && checkCollision(player, collectible)) {
+                    collectible.collected = true;
+                    
+                    const totalCoins = game.collectibles.length;
+                    const collectedCoins = game.collectibles.filter(c => c.collected).length;
+                    
+                    if (collectedCoins === totalCoins && !game.gameCompleted) {
+                        if (game.currentLevel < game.maxLevel) {
+                            startLevelTransition();
+                        } else if (game.currentLevel === game.maxLevel && !game.bossActive) {
+                            startCutscene();
+                        }
+                    }
+                }
+            }
+        }
+
+        function startLevelTransition() {
+            game.levelTransition = true;
+            setTimeout(() => {
+                game.currentLevel++;
+                player.x = 100;
+                player.y = 300;
+                player.vx = 0;
+                player.vy = 0;
+                player.grounded = false;
+                game.camera.x = 0;
+                game.camera.y = 0;
+                createLevel(game.currentLevel);
+                game.levelTransition = false;
+            }, 1500);
+        }
+
+        function startCutscene() {
+            game.cutsceneActive = true;
+            game.cutsceneFrame = 0;
+            game.gameCompleted = true;
+        }
+
+        function updateCutscene() {
+            if (game.cutsceneActive) {
+                game.cutsceneFrame++;
+                
+                if (game.cutsceneFrame > game.cutsceneMaxFrames) {
+                    game.cutsceneActive = false;
+                }
+            }
+        }
+
+        function drawCutscene() {
+            if (!game.cutsceneActive) return;
+            
+            const progress = game.cutsceneFrame / game.cutsceneMaxFrames;
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#FFD700';
+            ctx.font = 'bold 48px Arial';
+            ctx.textAlign = 'center';
+            
+            if (game.cutsceneFrame < 60) {
+                const fade = game.cutsceneFrame / 60;
+                ctx.globalAlpha = fade;
+                ctx.fillText('CONGRATULATIONS!', canvas.width / 2, canvas.height / 2 - 50);
+                ctx.globalAlpha = 1;
+            } else if (game.cutsceneFrame < 120) {
+                ctx.fillText('CONGRATULATIONS!', canvas.width / 2, canvas.height / 2 - 50);
+                
+                const sparkles = Math.floor((game.cutsceneFrame - 60) / 5);
+                for (let i = 0; i < sparkles; i++) {
+                    const x = canvas.width / 2 + Math.sin(i * 0.8 + game.cutsceneFrame * 0.1) * 100;
+                    const y = canvas.height / 2 - 50 + Math.cos(i * 0.6 + game.cutsceneFrame * 0.1) * 50;
+                    ctx.fillStyle = i % 2 === 0 ? '#FFD700' : '#FFF';
+                    ctx.fillText('✨', x, y);
+                }
+                ctx.fillStyle = '#FFD700';
+            } else if (game.cutsceneFrame < 180) {
+                ctx.fillText('CONGRATULATIONS!', canvas.width / 2, canvas.height / 2 - 50);
+                
+                ctx.font = '24px Arial';
+                ctx.fillStyle = '#FFF';
+                ctx.fillText('You collected all the coins!', canvas.width / 2, canvas.height / 2 + 20);
+            } else if (game.cutsceneFrame < 240) {
+                ctx.fillText('CONGRATULATIONS!', canvas.width / 2, canvas.height / 2 - 50);
+                
+                ctx.font = '24px Arial';
+                ctx.fillStyle = '#FFF';
+                ctx.fillText('You collected all the coins!', canvas.width / 2, canvas.height / 2 + 20);
+                
+                const bounce = Math.sin(game.cutsceneFrame * 0.3) * 10;
+                ctx.font = '20px Arial';
+                ctx.fillStyle = '#90EE90';
+                ctx.fillText('✨ LEVEL COMPLETE ✨', canvas.width / 2, canvas.height / 2 + 60 + bounce);
+            } else {
+                ctx.fillText('CONGRATULATIONS!', canvas.width / 2, canvas.height / 2 - 50);
+                
+                ctx.font = '24px Arial';
+                ctx.fillStyle = '#FFF';
+                ctx.fillText('You collected all the coins!', canvas.width / 2, canvas.height / 2 + 20);
+                
+                ctx.font = '20px Arial';
+                ctx.fillStyle = '#90EE90';
+                ctx.fillText('✨ LEVEL COMPLETE ✨', canvas.width / 2, canvas.height / 2 + 60);
+                
+                const fadeOut = 1 - Math.max(0, (game.cutsceneFrame - 240) / 60);
+                ctx.globalAlpha = fadeOut;
+                ctx.font = '16px Arial';
+                ctx.fillStyle = '#AAA';
+                ctx.fillText('Press any key to continue...', canvas.width / 2, canvas.height / 2 + 100);
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        function updateCamera() {
+            game.camera.x = player.x - canvas.width / 2;
+            game.camera.y = player.y - canvas.height / 2;
+
+            if (game.camera.x < 0) game.camera.x = 0;
+            if (game.camera.y < 0) game.camera.y = 0;
+        }
+
+        function drawTitleScreen() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Background
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#1a1a2e');
+            gradient.addColorStop(0.5, '#16213e');
+            gradient.addColorStop(1, '#0f3460');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Title
+            ctx.font = 'bold 64px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#e94560';
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 4;
+            ctx.strokeText('The obby where', canvas.width / 2, canvas.height / 2 - 60);
+            ctx.fillText('The obby where', canvas.width / 2, canvas.height / 2 - 60);
+            
+            ctx.strokeText('you have to die', canvas.width / 2, canvas.height / 2 + 20);
+            ctx.fillText('you have to die', canvas.width / 2, canvas.height / 2 + 20);
+            
+            // Animated subtitle
+            const pulse = Math.sin(game.titleAnimFrame * 0.1) * 0.3 + 0.7;
+            ctx.globalAlpha = pulse;
+            ctx.font = '24px Arial';
+            ctx.fillStyle = '#f5f5f5';
+            ctx.fillText('Press SPACE or ENTER to start', canvas.width / 2, canvas.height / 2 + 120);
+            ctx.globalAlpha = 1;
+            
+            game.titleAnimFrame++;
+        }
+
+        function draw() {
+            if (game.gameState === 'title') {
+                drawTitleScreen();
+                return;
+            }
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            ctx.translate(-game.camera.x, -game.camera.y);
+
+            for (let platform of game.platforms) {
+                ctx.fillStyle = platform.color;
+                ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+                if (platform.type === 'jumpthrough') {
+                    ctx.strokeStyle = '#8B4513';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+                }
+            }
+
+            for (let platform of game.movingPlatforms) {
+                ctx.fillStyle = platform.color;
+                ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+                ctx.strokeStyle = '#FF4500';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+            }
+
+            for (let collectible of game.collectibles) {
+                if (!collectible.collected) {
+                    ctx.fillStyle = collectible.color;
+                    ctx.beginPath();
+                    ctx.arc(collectible.x + collectible.width/2, collectible.y + collectible.height/2, 
+                           collectible.width/2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            if (game.bossActive && game.boss) {
+                const b = game.boss;
+                if (b.invulnerable && Math.floor(Date.now() / 100) % 2) {
+                    ctx.globalAlpha = 0.5;
+                }
+                
+                // Draw boss body with gradient effect
+                const gradient = ctx.createLinearGradient(b.x, b.y, b.x, b.y + b.height);
+                gradient.addColorStop(0, '#FF4500');
+                gradient.addColorStop(0.5, '#8B0000');
+                gradient.addColorStop(1, '#4B0000');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(b.x, b.y, b.width, b.height);
+                
+                // Draw boss outline
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 4;
+                ctx.strokeRect(b.x, b.y, b.width, b.height);
+                
+                // Draw eyes
+                ctx.fillStyle = '#FF0000';
+                ctx.beginPath();
+                ctx.arc(b.x + b.width * 0.3, b.y + b.height * 0.3, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(b.x + b.width * 0.7, b.y + b.height * 0.3, 8, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw boss label
+                ctx.fillStyle = '#FFD700';
+                ctx.font = 'bold 16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('BOSS', b.x + b.width/2, b.y - 10);
+                
+                // Draw health bar background
+                ctx.fillStyle = '#000';
+                ctx.fillRect(b.x - 2, b.y - 25, b.width + 4, 8);
+                ctx.fillStyle = '#FF0000';
+                ctx.fillRect(b.x, b.y - 23, b.width, 4);
+                
+                // Draw health bar
+                ctx.fillStyle = '#00FF00';
+                const healthWidth = (b.health / b.maxHealth) * b.width;
+                ctx.fillRect(b.x, b.y - 23, healthWidth, 4);
+                
+                ctx.globalAlpha = 1;
+            }
+
+            if (player.imageLoaded && player.image) {
+                ctx.save();
+                if (!player.facingRight) {
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(player.image, -(player.x + player.width), player.y, player.width, player.height);
+                } else {
+                    ctx.drawImage(player.image, player.x, player.y, player.width, player.height);
+                }
+                ctx.restore();
+            } else {
+                ctx.fillStyle = player.color;
+                ctx.fillRect(player.x, player.y, player.width, player.height);
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(player.x, player.y, player.width, player.height);
+            }
+
+            ctx.restore();
+
+            ctx.fillStyle = '#333';
+            ctx.font = '16px Arial';
+            const coinsText = 'Level ' + game.currentLevel + ' | Coins: ' + game.collectibles.filter(c => c.collected).length + '/' + game.collectibles.length;
+            const bossText = game.bossActive && game.boss ? ' | Boss HP: ' + game.boss.health + '/' + game.boss.maxHealth : '';
+            ctx.fillText(coinsText + bossText, 10, 30);
+            
+            if (game.levelTransition) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.fillStyle = '#FFD700';
+                ctx.font = 'bold 36px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Level ' + (game.currentLevel - 1) + ' Complete!', canvas.width / 2, canvas.height / 2 - 20);
+                
+                ctx.font = '20px Arial';
+                ctx.fillStyle = '#FFF';
+                ctx.fillText('Moving to Level ' + game.currentLevel + '...', canvas.width / 2, canvas.height / 2 + 20);
+            }
+        }
+
+        function drawPauseScreen() {
+            if (!game.paused) return;
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#FFF';
+            ctx.font = 'bold 48px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2 - 20);
+            
+            ctx.font = '20px Arial';
+            ctx.fillStyle = '#CCC';
+            ctx.fillText('Press SPACE to resume', canvas.width / 2, canvas.height / 2 + 30);
+        }
+
+        function gameLoop() {
+            if (game.gameState === 'playing') {
+                if (!game.cutsceneActive && !game.paused) {
+                    updatePlayer();
+                    updateMovingPlatforms();
+                    updateBoss();
+                    handleCollisions();
+                    updateCollectibles();
+                    updateCamera();
+                } else if (game.cutsceneActive) {
+                    updateCutscene();
+                }
+            }
+            
+            draw();
+            if (game.gameState === 'playing') {
+                drawCutscene();
+                drawPauseScreen();
+            }
+            requestAnimationFrame(gameLoop);
+        }
+
+        gameLoop();
+    </script>
+</body>
+</html>
